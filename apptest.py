@@ -1,6 +1,3 @@
-import sys
-
-sys.path.append("./")
 from PIL import Image
 from src.tryon_pipeline import StableDiffusionXLInpaintPipeline as TryonPipeline
 from src.unet_hacked_garmnet import UNet2DConditionModel as UNet2DConditionModel_ref
@@ -30,6 +27,16 @@ import numpy as np
 from PIL import Image
 
 from apputils import resize_and_center, pil_to_binary_mask, start_tryon
+
+import os
+import torch
+from diffusers.image_processor import VaeImageProcessor
+from huggingface_hub import snapshot_download
+from PIL import Image
+
+from model1.cloth_masker import AutoMasker
+from model1.pipeline import CatVTONPipeline
+from utils import init_weight_dtype, process_single_request
 
 
 base_path = "yisol/IDM-VTON"
@@ -109,12 +116,48 @@ pipe = TryonPipeline.from_pretrained(
 pipe.unet_encoder = UNet_Encoder
 
 
+repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
+
+# Pipeline
+pipeline = CatVTONPipeline(
+    base_ckpt="booksforcharlie/stable-diffusion-inpainting",
+    attn_ckpt=repo_path,
+    attn_ckpt_version="mix",
+    weight_dtype=init_weight_dtype("bf16"),
+    use_tf32=True,
+    device="cuda",
+    skip_safety_check=True,
+)
+# AutoMasker
+mask_processor = VaeImageProcessor(
+    vae_scale_factor=8, do_normalize=False, do_binarize=True, do_convert_grayscale=True
+)
+automasker = AutoMasker(
+    densepose_ckpt=os.path.join(repo_path, "DensePose"),
+    schp_ckpt=os.path.join(repo_path, "SCHP"),
+    device="cuda",
+)
+
+
 # Main block: process upper_body using human.png and garment.png, save result, and exit
 if __name__ == "__main__":
     try:
         # Read images
         human_img = Image.open("human.png").convert("RGB")
         garm_img = Image.open("garment.png").convert("RGB")
+
+        temp = process_single_request(
+            automasker,
+            mask_processor,
+            pipeline,
+            Image.open("human.png"),
+            Image.open("garment.png"),
+            "overall",
+        )
+
+        if temp:
+            temp.save("cat_result.png")
+            print("Image processed and saved as output_image.png")
 
         # Create dummy dict for compatibility
         dict = {"background": human_img, "layers": [human_img]}
