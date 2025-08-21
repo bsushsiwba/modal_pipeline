@@ -17,7 +17,7 @@ from transformers import CLIPImageProcessor
 
 from model1.attn_processor import SkipAttnProcessor
 from model1.utils import get_trainable_module, init_adapter
-from utils import (
+from utilssam import (
     compute_vae_encodings,
     numpy_to_pil,
     prepare_image,
