@@ -28,17 +28,6 @@ from PIL import Image
 
 from apputils import resize_and_center, pil_to_binary_mask, start_tryon
 
-import os
-import torch
-from diffusers.image_processor import VaeImageProcessor
-from huggingface_hub import snapshot_download
-from PIL import Image
-
-from model1.cloth_masker import AutoMasker
-from model1.pipeline import CatVTONPipeline
-from utils import init_weight_dtype, process_single_request
-
-
 base_path = "yisol/IDM-VTON"
 example_path = os.path.join(os.path.dirname(__file__), "example")
 
@@ -116,6 +105,16 @@ pipe = TryonPipeline.from_pretrained(
 pipe.unet_encoder = UNet_Encoder
 
 
+import os
+import torch
+from diffusers.image_processor import VaeImageProcessor
+from huggingface_hub import snapshot_download
+from PIL import Image
+
+from model1.cloth_masker import AutoMasker
+from model1.pipeline import CatVTONPipeline
+from utilssam import init_weight_dtype, process_single_request
+
 repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
 
 # Pipeline
@@ -150,8 +149,8 @@ if __name__ == "__main__":
             automasker,
             mask_processor,
             pipeline,
-            Image.open("human.png"),
-            Image.open("garment.png"),
+            human_img,
+            garm_img,
             "overall",
         )
 
