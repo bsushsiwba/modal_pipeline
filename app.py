@@ -1,61 +1,46 @@
-from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.responses import Response
-from PIL import Image
-import io
-import sys
-
-sys.path.append("./gradio_demo")
-from gradio_demo.app import start_tryon
+import os
 import torch
+from diffusers.image_processor import VaeImageProcessor
+from huggingface_hub import snapshot_download
+from PIL import Image
 
-app = FastAPI()
+from model1.cloth_masker import AutoMasker
+from model1.pipeline import CatVTONPipeline
+from utils import init_weight_dtype, process_single_request
 
+repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
 
-@app.post("/tryon")
-async def try_on(
-    human: UploadFile = File(...),
-    garment: UploadFile = File(...),
-    body_part: str = Form(...),
-    garment_description: str = Form(...),
-):
-    # Read and convert uploaded files to PIL Images
-    human_image = Image.open(io.BytesIO(await human.read()))
-    garment_image = Image.open(io.BytesIO(await garment.read()))
-
-    # Prepare the dictionary input expected by start_tryon
-    human_dict = {
-        "background": human_image,
-        "layers": [Image.new("RGB", human_image.size, "white")],  # Create a white mask
-        "composite": None,
-    }
-
-    # Default parameters for try-on
-    is_checked = True
-    is_checked_crop = True
-    denoise_steps = 30
-    seed = 42
-
-    # Process the images
-    result_image, mask_image = start_tryon(
-        human_dict,
-        garment_image,
-        garment_description,
-        is_checked,
-        is_checked_crop,
-        denoise_steps,
-        seed,
-        body_part,
-    )
-
-    # Convert PIL image to bytes
-    img_byte_arr = io.BytesIO()
-    result_image.save(img_byte_arr, format="PNG")
-    img_byte_arr = img_byte_arr.getvalue()
-
-    return Response(content=img_byte_arr, media_type="image/png")
+# Pipeline
+pipeline = CatVTONPipeline(
+    base_ckpt="booksforcharlie/stable-diffusion-inpainting",
+    attn_ckpt=repo_path,
+    attn_ckpt_version="mix",
+    weight_dtype=init_weight_dtype("bf16"),
+    use_tf32=True,
+    device="cuda",
+    skip_safety_check=True,
+)
+# AutoMasker
+mask_processor = VaeImageProcessor(
+    vae_scale_factor=8, do_normalize=False, do_binarize=True, do_convert_grayscale=True
+)
+automasker = AutoMasker(
+    densepose_ckpt=os.path.join(repo_path, "DensePose"),
+    schp_ckpt=os.path.join(repo_path, "SCHP"),
+    device="cuda",
+)
 
 
 if __name__ == "__main__":
-    import uvicorn
+    temp = process_single_request(
+        automasker,
+        mask_processor,
+        pipeline,
+        Image.open("human.png"),
+        Image.open("garment.png"),
+        "overall",
+    )
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    if temp:
+        temp.save("cat_result.png")
+        print("Image processed and saved as output_image.png")
