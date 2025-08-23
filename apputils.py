@@ -99,9 +99,29 @@ def start_tryon(
     else:
         human_img = human_img_orig.resize((768, 1024))
 
-    # Remove all file-based intermediate processing. Only process upper_body directly.
-    # For lower_body and dresses, skip CatVTON and related file IO. Only use input images.
-    human_mask = None
+    # if lower body is selected, read cloth_b.png as garm_img
+    if selected_body_part == "lower_body":
+        # process with CatVTON here
+        # read cat_result.png for person image
+        human_img = Image.open("cat_result.png").convert("RGB")
+
+        human_mask = None
+        try:
+            human_mask = Image.open("mask_b.png").convert("RGB")
+        except:
+            print("mask_b.png not found")
+            human_mask = None
+
+        garm_img = Image.open("cloth_b.png").convert("RGB")
+
+    elif selected_body_part == "dresses":
+        # process with CatVTON here
+        # read cat_result.png as final result and return
+        human_img = Image.open("cat_result.png").convert("RGB")
+        garm_img = Image.open("cloth_u.png").convert("RGB")
+
+    else:
+        garm_img = Image.open("cloth_u.png").convert("RGB")
 
     garm_img = garm_img.resize((768, 1024))
 
@@ -111,9 +131,41 @@ def start_tryon(
         mask, mask_gray = get_mask_location(
             "hd", selected_body_part, model_parse, keypoints
         )
+
+        # if selected lower body then or with human_mask
+        if selected_body_part == "lower_body" and human_mask is not None:
+            # Convert human_mask to grayscale and ensure 2D array
+            human_mask = human_mask.convert("L")
+            human_mask = human_mask.resize((mask.size[0], mask.size[1]))
+            mask = Image.fromarray(
+                np.clip(
+                    np.array(mask, dtype=np.uint8)
+                    | np.array(human_mask, dtype=np.uint8),
+                    0,
+                    255,
+                ).astype(np.uint8)
+            )
+
+            # go column wise, note first and last white pixel. Fill all pixels in between with white
+            mask = np.array(mask)
+            for j in range(mask.shape[1]):  # loop through columns
+                first_white = -1
+                last_white = -1
+                for i in range(mask.shape[0]):  # loop through rows
+                    if mask[i, j] == 255:
+                        if first_white == -1:
+                            first_white = i
+                        last_white = i
+                if first_white != -1 and last_white != -1:
+                    mask[first_white:last_white, j] = 255
+            mask = Image.fromarray(mask)
+            mask = mask.convert("L")
         mask = mask.resize((768, 1024))
+
     else:
         mask = pil_to_binary_mask(dict["layers"][0].convert("RGB").resize((768, 1024)))
+        # mask = transforms.ToTensor()(mask)
+        # mask = mask.unsqueeze(0)
 
     # get last white pixel in each column, if it is less than 50px from bottom, set all from there to bottom to white
     mask = np.array(mask)
