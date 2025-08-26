@@ -32,8 +32,8 @@ automasker = AutoMasker(
 )
 
 # open images
-human_img = Image.open("human.jpg").convert("RGB")
-garm_img = Image.open("garment.png").convert("RGB")
+human_img = Image.open("human.png")
+garm_img = Image.open("garment.png")
 
 # wait for cat_full or cat_lower to be created
 while not (os.path.exists("cat_full.txt") or os.path.exists("cat_lower.txt")):
