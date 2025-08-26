@@ -113,7 +113,7 @@ from PIL import Image
 
 from model1.cloth_masker import AutoMasker
 from model1.pipeline import CatVTONPipeline
-from utilssam import init_weight_dtype, process_single_request
+from catutils import init_weight_dtype, process_single_request
 
 repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
 

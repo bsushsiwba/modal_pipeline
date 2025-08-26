@@ -3,6 +3,7 @@ import torch
 from diffusers.image_processor import VaeImageProcessor
 from huggingface_hub import snapshot_download
 from PIL import Image
+import time
 
 from model1.cloth_masker import AutoMasker
 from model1.pipeline import CatVTONPipeline
@@ -30,17 +31,35 @@ automasker = AutoMasker(
     device="cuda",
 )
 
+# open images
+human_img = Image.open("human.jpg").convert("RGB")
+garm_img = Image.open("garment.png").convert("RGB")
 
-if __name__ == "__main__":
-    temp = process_single_request(
-        automasker,
-        mask_processor,
-        pipeline,
-        Image.open("human.png"),
-        Image.open("garment.png"),
-        "overall",
-    )
+# wait for cat_full or cat_lower to be created
+while not (os.path.exists("cat_full.txt") or os.path.exists("cat_lower.txt")):
+    time.sleep(0.1)
 
-    if temp:
-        temp.save("cat_result.png")
-        print("Image processed and saved as output_image.png")
+garm_type = "full" if os.path.exists("cat_full.txt") else "lower"
+
+# delete cat_full.txt and cat_lower.txt if they exist
+if os.path.exists("cat_full.txt"):
+    os.remove("cat_full.txt")
+if os.path.exists("cat_lower.txt"):
+    os.remove("cat_lower.txt")
+
+temp = process_single_request(
+    automasker,
+    mask_processor,
+    pipeline,
+    human_img,
+    garm_img,
+    garm_type,
+)
+
+if temp:
+    temp.save("cat_result.png")
+    print("Image processed and saved as output_image.png")
+
+# create cat_complete.txt to signal completion
+with open("cat_complete.txt", "w") as f:
+    f.write("done")

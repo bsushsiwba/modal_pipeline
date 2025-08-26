@@ -367,7 +367,7 @@ from PIL import Image
 
 from model.cloth_masker import AutoMasker
 from model.pipeline import CatVTONPipeline
-from utilssam import init_weight_dtype, resize_and_crop, resize_and_padding
+from catutils import init_weight_dtype, resize_and_crop, resize_and_padding
 
 from samutils import samutils_segment
 
