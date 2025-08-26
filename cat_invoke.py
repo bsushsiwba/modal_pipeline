@@ -39,7 +39,7 @@ garm_img = Image.open("garment.png")
 while not (os.path.exists("cat_full.txt") or os.path.exists("cat_lower.txt")):
     time.sleep(0.1)
 
-garm_type = "full" if os.path.exists("cat_full.txt") else "lower"
+garm_type = "overall" if os.path.exists("cat_full.txt") else "lower"
 
 # delete cat_full.txt and cat_lower.txt if they exist
 if os.path.exists("cat_full.txt"):
