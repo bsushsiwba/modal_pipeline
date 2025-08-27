@@ -16,14 +16,15 @@ base_model = GroundedSAM2(
 )
 print("SAM ready")
 
-# wait for process_sam.txt to be created
-while not os.path.exists("process_sam.txt"):
-    time.sleep(0.1)
-# delete process_sam.txt
-os.remove("process_sam.txt")
+while True:
+    # wait for process_sam.txt to be created
+    while not os.path.exists("process_sam.txt"):
+        time.sleep(0.1)
+    # delete process_sam.txt
+    os.remove("process_sam.txt")
 
-samutils_segment(base_model)
+    samutils_segment(base_model)
 
-# create sam_complete.txt to signal completion
-with open("sam_complete.txt", "w") as f:
-    f.write("done")
+    # create sam_complete.txt to signal completion
+    with open("sam_complete.txt", "w") as f:
+        f.write("done")
