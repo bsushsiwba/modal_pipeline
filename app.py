@@ -125,11 +125,14 @@ def run_tryon(human_image: Image.Image, garment_image: Image.Image, garment_type
     # trigger SAM
     with open("process_sam.txt", "w") as f:
         f.write("process sam")
+        print("SAM txt written")
 
     # trigger CAT
     with open(f"cat_{'full' if garment_type == 'dresses' else 'lower'}.txt", "w") as f:
         f.write("process cat")
+        print("CAT txt written")
 
+    print("Waiting for SAM and CAT to complete...")
     # wait for signals
     while not (
         os.path.exists("sam_complete.txt") and os.path.exists("cat_complete.txt")
