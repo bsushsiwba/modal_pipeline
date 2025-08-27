@@ -1,11 +1,13 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 import uvicorn
-from pyngrok import ngrok
+from pyngrok import ngrok, conf
 import subprocess
 import os
 import time
 import io
+
+conf.get_default().auth_token = "2I5wsdcXFHV3hMVNmc3Ki8ifZPi_4GJEBnPpHpVQkdSPfFCuz"
 
 subprocess.Popen(["python", "sam_invoke.py"])
 
