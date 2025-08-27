@@ -1,46 +1,179 @@
-import os
-import torch
-from diffusers.image_processor import VaeImageProcessor
-from huggingface_hub import snapshot_download
+import gradio as gr
+import io
 from PIL import Image
+import torch
+import os
+import time
+import subprocess
 
-from model1.cloth_masker import AutoMasker
-from model1.pipeline import CatVTONPipeline
-from catutils import init_weight_dtype, process_single_request
-
-repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
-
-# Pipeline
-pipeline = CatVTONPipeline(
-    base_ckpt="booksforcharlie/stable-diffusion-inpainting",
-    attn_ckpt=repo_path,
-    attn_ckpt_version="mix",
-    weight_dtype=init_weight_dtype("bf16"),
-    use_tf32=True,
-    device="cuda",
-    skip_safety_check=True,
+# import your existing pipeline setup here
+from src.tryon_pipeline import StableDiffusionXLInpaintPipeline as TryonPipeline
+from src.unet_hacked_garmnet import UNet2DConditionModel as UNet2DConditionModel_ref
+from src.unet_hacked_tryon import UNet2DConditionModel
+from transformers import (
+    CLIPImageProcessor,
+    CLIPVisionModelWithProjection,
+    CLIPTextModel,
+    CLIPTextModelWithProjection,
+    AutoTokenizer,
 )
-# AutoMasker
-mask_processor = VaeImageProcessor(
-    vae_scale_factor=8, do_normalize=False, do_binarize=True, do_convert_grayscale=True
-)
-automasker = AutoMasker(
-    densepose_ckpt=os.path.join(repo_path, "DensePose"),
-    schp_ckpt=os.path.join(repo_path, "SCHP"),
-    device="cuda",
-)
+from diffusers import DDPMScheduler, AutoencoderKL
+from preprocess.humanparsing.run_parsing import Parsing
+from preprocess.openpose.run_openpose import OpenPose
+from apputils import start_tryon
 
 
-if __name__ == "__main__":
-    temp = process_single_request(
-        automasker,
-        mask_processor,
-        pipeline,
-        Image.open("human.png"),
-        Image.open("garment.png"),
-        "overall",
+# ---------------------------
+# INIT MODELS ONCE
+# ---------------------------
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+base_path = "yisol/IDM-VTON"
+
+# background processes
+subprocess.Popen(["python", "sam_invoke.py"])
+subprocess.Popen(["python", "cat_invoke.py"])
+
+# main components
+unet = UNet2DConditionModel.from_pretrained(
+    base_path, subfolder="unet", torch_dtype=torch.float16
+)
+unet.requires_grad_(False)
+
+tokenizer_one = AutoTokenizer.from_pretrained(
+    base_path, subfolder="tokenizer", use_fast=False
+)
+tokenizer_two = AutoTokenizer.from_pretrained(
+    base_path, subfolder="tokenizer_2", use_fast=False
+)
+
+noise_scheduler = DDPMScheduler.from_pretrained(base_path, subfolder="scheduler")
+text_encoder_one = CLIPTextModel.from_pretrained(
+    base_path, subfolder="text_encoder", torch_dtype=torch.float16
+)
+text_encoder_two = CLIPTextModelWithProjection.from_pretrained(
+    base_path, subfolder="text_encoder_2", torch_dtype=torch.float16
+)
+image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+    base_path, subfolder="image_encoder", torch_dtype=torch.float16
+)
+vae = AutoencoderKL.from_pretrained(
+    base_path, subfolder="vae", torch_dtype=torch.float16
+)
+UNet_Encoder = UNet2DConditionModel_ref.from_pretrained(
+    base_path, subfolder="unet_encoder", torch_dtype=torch.float16
+)
+
+parsing_model = Parsing(0)
+openpose_model = OpenPose(0)
+
+for m in [UNet_Encoder, image_encoder, vae, unet, text_encoder_one, text_encoder_two]:
+    m.requires_grad_(False)
+
+pipe = TryonPipeline.from_pretrained(
+    base_path,
+    unet=unet,
+    vae=vae,
+    feature_extractor=CLIPImageProcessor(),
+    text_encoder=text_encoder_one,
+    text_encoder_2=text_encoder_two,
+    tokenizer=tokenizer_one,
+    tokenizer_2=tokenizer_two,
+    scheduler=noise_scheduler,
+    image_encoder=image_encoder,
+    torch_dtype=torch.float16,
+)
+pipe.unet_encoder = UNet_Encoder
+
+
+# ---------------------------
+# TRYON FUNCTION
+# ---------------------------
+def run_tryon(human_image: Image.Image, garment_image: Image.Image, garment_type: str):
+    # delete old marker files
+    for f in [
+        "process_sam.txt",
+        "cat_full.txt",
+        "cat_lower.txt",
+        "sam_complete.txt",
+        "cat_complete.txt",
+    ]:
+        if os.path.exists(f):
+            os.remove(f)
+
+    # validate garment type
+    if garment_type not in ["upper", "lower", "full"]:
+        raise ValueError(
+            "Invalid garment_type. Must be one of: 'upper', 'lower', 'full'."
+        )
+    elif garment_type == "upper":
+        garment_type = "upper_body"
+    elif garment_type == "lower":
+        garment_type = "lower_body"
+    elif garment_type == "full":
+        garment_type = "dresses"
+
+    # save input images
+    human_image.save("human.png")
+    garment_image.save("garment.png")
+
+    # trigger SAM
+    with open("process_sam.txt", "w") as f:
+        f.write("process sam")
+
+    # trigger CAT
+    with open(f"cat_{'full' if garment_type == 'dresses' else 'lower'}.txt", "w") as f:
+        f.write("process cat")
+
+    # wait for signals
+    while not (
+        os.path.exists("sam_complete.txt") and os.path.exists("cat_complete.txt")
+    ):
+        time.sleep(0.1)
+
+    # reload images
+    human_img = Image.open("human.png").convert("RGB")
+    garm_img = Image.open("garment.png").convert("RGB")
+
+    dummy_dict = {"background": human_img, "layers": [human_img]}
+
+    print("Calling IDM Tryon_Pipeline...")
+    result, _ = start_tryon(
+        dummy_dict,
+        garm_img,
+        "",  # description
+        True,  # is_checked
+        True,  # is_checked_crop
+        30,  # denoise_steps
+        42,  # seed
+        garment_type,
+        openpose_model,
+        pipe,
+        device,
+        parsing_model,
     )
 
-    if temp:
-        temp.save("cat_result.png")
-        print("Image processed and saved as output_image.png")
+    return result
+
+
+# ---------------------------
+# GRADIO APP
+# ---------------------------
+with gr.Blocks() as demo:
+    gr.Markdown("## 👗 Virtual Try-On (IDM-VTON)")
+
+    with gr.Row():
+        human_in = gr.Image(type="pil", label="Upload Human Image")
+        garment_in = gr.Image(type="pil", label="Upload Garment Image")
+
+    garment_type = gr.Radio(
+        ["upper", "lower", "full"], label="Garment Type", value="upper"
+    )
+    run_btn = gr.Button("Run Try-On")
+
+    output_img = gr.Image(type="pil", label="Result")
+
+    run_btn.click(
+        run_tryon, inputs=[human_in, garment_in, garment_type], outputs=output_img
+    )
+
+demo.launch(share=True)
