@@ -5,6 +5,11 @@ import torch
 import os
 import time
 import subprocess
+from fastapi import FastAPI, UploadFile, Form
+from fastapi.responses import StreamingResponse
+import uvicorn
+from pyngrok import ngrok, conf
+from enum import Enum
 
 # import your existing pipeline setup here
 from src.tryon_pipeline import StableDiffusionXLInpaintPipeline as TryonPipeline
@@ -22,6 +27,7 @@ from preprocess.humanparsing.run_parsing import Parsing
 from preprocess.openpose.run_openpose import OpenPose
 from apputils import start_tryon
 
+conf.get_default().auth_token = "2I5wsdcXFHV3hMVNmc3Ki8ifZPi_4GJEBnPpHpVQkdSPfFCuz"
 
 # ---------------------------
 # INIT MODELS ONCE
@@ -155,25 +161,39 @@ def run_tryon(human_image: Image.Image, garment_image: Image.Image, garment_type
     return result
 
 
-# ---------------------------
-# GRADIO APP
-# ---------------------------
-with gr.Blocks() as demo:
-    gr.Markdown("## 👗 Virtual Try-On (IDM-VTON)")
+app = FastAPI()
 
-    with gr.Row():
-        human_in = gr.Image(type="pil", label="Upload Human Image")
-        garment_in = gr.Image(type="pil", label="Upload Garment Image")
 
-    garment_type = gr.Radio(
-        ["upper", "lower", "full"], label="Garment Type", value="upper"
+class DressingType(str, Enum):
+    upper = "upper"
+    lower = "lower"
+    full = "full"
+
+
+@app.post("/tryon")
+async def tryon(
+    human_image: UploadFile,
+    garment_image: UploadFile,
+    dressing_type: DressingType = Form(...),
+):
+    # Read images into bytes
+    human_bytes = await human_image.read()
+    print("[tryon] Read human image bytes.")
+    garment_bytes = await garment_image.read()
+    print("[tryon] Read garment image bytes.")
+
+    result = run_tryon(
+        Image.open(io.BytesIO(human_bytes)).convert("RGB"),
+        Image.open(io.BytesIO(garment_bytes)).convert("RGB"),
+        dressing_type.value,
     )
-    run_btn = gr.Button("Run Try-On")
 
-    output_img = gr.Image(type="pil", label="Result")
+    return StreamingResponse(io.BytesIO(result), media_type="image/png")
 
-    run_btn.click(
-        run_tryon, inputs=[human_in, garment_in, garment_type], outputs=output_img
-    )
 
-demo.launch(share=True)
+if __name__ == "__main__":
+    # Open an ngrok tunnel to the FastAPI app
+    public_url = ngrok.connect(8000)
+    print("Public URL:", public_url)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
