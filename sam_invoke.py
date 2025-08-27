@@ -14,6 +14,7 @@ base_model = GroundedSAM2(
         }
     )
 )
+print("SAM ready")
 
 # wait for process_sam.txt to be created
 while not os.path.exists("process_sam.txt"):

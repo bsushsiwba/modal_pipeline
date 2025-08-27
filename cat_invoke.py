@@ -31,6 +31,8 @@ automasker = AutoMasker(
     device="cuda",
 )
 
+print("CAT loaded")
+
 # open images
 human_img = Image.open("human.png")
 garm_img = Image.open("garment.png")
